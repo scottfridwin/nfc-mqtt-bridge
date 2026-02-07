@@ -16,4 +16,4 @@ if [ ! -S /run/pcscd/pcscd.comm ]; then
   exit 1
 fi
 
-exec python /app/app.py
+exec python /app/nfc_reader.py
