@@ -13,6 +13,7 @@ from smartcard.scard import (
     SCardGetStatusChange,
     SCARD_STATE_PRESENT,
 )
+from smartcard.pcsc.PCSCReader import readers as pcsc_readers
 from smartcard.pcsc.PCSCExceptions import EstablishContextException
 
 # -----------------------
