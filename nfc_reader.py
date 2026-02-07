@@ -31,6 +31,7 @@ MQTT_USERNAME = os.getenv("MQTT_USERNAME")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 MQTT_TOPIC = os.getenv("MQTT_TOPIC", "homeassistant/nfc/tag")
 DEVICE_ID = os.getenv("DEVICE_ID", "nfc_reader")
+DEVICE_NAME = os.getenv("DEVICE_NAME", f"NFC Reader {DEVICE_ID}")
 
 # Home Assistant discovery topics
 DISCOVERY_TOPIC = f"homeassistant/sensor/{DEVICE_ID}/uid/config"
