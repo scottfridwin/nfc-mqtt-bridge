@@ -62,7 +62,7 @@ def publish_discovery(client):
         "icon": "mdi:nfc",
         "device": {
             "identifiers": [DEVICE_ID],
-            "name": DEVICE_NAME",
+            "name": DEVICE_NAME,
             "manufacturer": "DIY",
             "model": "Raspberry Pi NFC",
         }
