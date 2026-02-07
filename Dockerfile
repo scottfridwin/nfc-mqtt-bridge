@@ -1,51 +1,27 @@
-# =========================
-# Build stage
-# =========================
-FROM python:3.11-slim AS builder
+# 1. Base image
+FROM python:3.9-bullseye AS base
 
-WORKDIR /build
-
-# Install build dependencies
+# 2. Install system dependencies in one layer
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    swig \
-    libpcsclite-dev \
-    libusb-1.0-0-dev \
-    pkg-config \
-    python3-dev \
- && rm -rf /var/lib/apt/lists/*
+    libpcsclite1 libpcsclite-dev pcsc-tools \
+    libusb-1.0-0 libusb-1.0-0-dev \
+    build-essential pkg-config \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first (for caching)
-COPY requirements.txt .
-
-# Build wheels
-RUN pip install --upgrade pip setuptools wheel \
- && pip wheel --no-cache-dir --no-deps -r requirements.txt
-
-
-# =========================
-# Runtime stage
-# =========================
-FROM python:3.11-slim
-
+# 3. Set working directory
 WORKDIR /app
 
-# Install runtime deps only
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpcsclite1 \
-    pcsc-tools \
- && rm -rf /var/lib/apt/lists/*
+# 4. Copy and install Python dependencies separately for caching
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
+&& pip install --no-cache-dir -r requirements.txt
 
-# Copy wheels from builder
-COPY --from=builder /build /wheels
-
-# Install wheels
-RUN pip install --no-cache-dir /wheels/*
-
-# Copy app
-COPY nfc_reader.py .
-COPY start.sh .
-
+# 5. Copy application code last to leverage layer caching
+COPY nfc_reader.py start.sh .
 RUN chmod +x start.sh
 
-ENTRYPOINT ["./start.sh"]
+# 6. Use non-root user
+RUN useradd -m -u 1000 nfcuser
+USER nfcuser
+
+CMD ["./start.sh"]
