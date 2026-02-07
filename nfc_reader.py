@@ -13,7 +13,7 @@ from smartcard.scard import (
     SCardGetStatusChange,
     SCARD_STATE_PRESENT,
 )
-from smartcard.pcsc.PCSCReader import readers as pcsc_readers
+from smartcard.System import readers
 from smartcard.pcsc.PCSCExceptions import EstablishContextException
 
 # -----------------------
@@ -90,7 +90,7 @@ def monitor_reader(client):
     while True:
         try:
             # Wait indefinitely for a card present event
-            readers_list = pcsc_readers(context)
+            readers_list = readers()
             if not readers_list:
                 time.sleep(2)
                 continue
