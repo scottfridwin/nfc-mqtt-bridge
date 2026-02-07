@@ -1,57 +1,35 @@
-# syntax=docker/dockerfile:1.7
-
-############################
-# Base image
-############################
+# Use slim Python image for small size
 FROM python:3.11-slim
 
-ENV \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PIP_PREFER_BINARY=1
-
-WORKDIR /app
-
-############################
-# System dependencies
-############################
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Install dependencies for PCSC and building pyscard
+RUN apt-get update && apt-get install -y \
     pcscd \
     libpcsclite1 \
     libpcsclite-dev \
     pcsc-tools \
     libusb-1.0-0 \
-    ca-certificates \
-    curl \
-    gcc \
-    pkg-config \
+    libusb-1.0-0-dev \
     build-essential \
+    pkg-config \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-############################
-# Python dependencies (cached)
-############################
-COPY requirements.txt .
+# Set working directory
+WORKDIR /app
 
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --upgrade pip setuptools wheel && \
-    pip install --prefer-binary -r requirements.txt
+# Copy application files
+COPY nfc_reader.py start.sh requirements.txt ./
 
-############################
-# Application code
-############################
-COPY nfc_reader.py .
-COPY start.sh .
+# Install Python dependencies
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && pip install --no-cache-dir -r requirements.txt
+
+# Make startup script executable
 RUN chmod +x start.sh
 
-############################
-# Non-root user (security)
-############################
-RUN useradd -m appuser
-USER appuser
+# Use non-root user for safety
+RUN useradd -m -u 1000 nfcuser && chown -R nfcuser:nfcuser /app
+USER nfcuser
 
-############################
-# Startup
-############################
-ENTRYPOINT ["./start.sh"]
+# Entrypoint
+CMD ["./start.sh"]
