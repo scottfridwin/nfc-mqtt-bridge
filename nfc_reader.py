@@ -2,8 +2,11 @@ import os
 import time
 import logging
 import paho.mqtt.client as mqtt
-from smartcard.System import readers
+
+from smartcard.pcsc.PCSCReader import establishContext, SCARD_SCOPE_USER
+from smartcard.pcsc.PCSCExceptions import EstablishContextException
 from smartcard.util import toHexString
+from smartcard.pcsc.PCSCReader import readers as pcsc_readers
 
 # Logging
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
@@ -11,31 +14,39 @@ logging.basicConfig(level=LOG_LEVEL)
 log = logging.getLogger("nfc")
 
 # MQTT Config
-MQTT_HOST = os.getenv("MQTT_HOST", "192.168.0.17")
+MQTT_HOST = os.getenv("MQTT_HOST")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_USERNAME = os.getenv("MQTT_USERNAME")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 MQTT_TOPIC = os.getenv("MQTT_TOPIC", "homeassistant/nfc/tag")
 
+
 def setup_mqtt():
     client = mqtt.Client()
-
     if MQTT_USERNAME:
         client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
-
     client.connect(MQTT_HOST, MQTT_PORT, 60)
     client.loop_start()
     log.info("Connected to MQTT broker")
     return client
 
+
 def wait_for_reader():
+    """Wait for an NFC reader and force PC/SC v4 protocol context"""
     while True:
-        r = readers()
-        if r:
-            log.info(f"Found reader: {r[0]}")
-            return r[0]
+        try:
+            # Force v4 context
+            context = establishContext(SCARD_SCOPE_USER)
+            r = pcsc_readers(context)
+            if r:
+                log.info(f"Found reader: {r[0]}")
+                return r[0]
+        except EstablishContextException as e:
+            log.warning(f"Failed to establish PC/SC context: {e}")
+
         log.info("Waiting for NFC reader...")
         time.sleep(2)
+
 
 def main():
     log.info("Starting NFC MQTT Bridge")
@@ -47,7 +58,6 @@ def main():
     while True:
         try:
             connection.connect()
-            # APDU command to get UID
             apdu = [0xFF, 0xCA, 0x00, 0x00, 0x00]
             data, sw1, sw2 = connection.transmit(apdu)
 
@@ -57,12 +67,13 @@ def main():
                     log.info(f"Tag detected: {uid}")
                     mqtt_client.publish(MQTT_TOPIC, uid, qos=1, retain=False)
                     last_uid = uid
-            time.sleep(1)
 
+            time.sleep(1)
         except Exception as e:
             log.error(f"Reader error: {e}")
             last_uid = None
             time.sleep(2)
+
 
 if __name__ == "__main__":
     main()
