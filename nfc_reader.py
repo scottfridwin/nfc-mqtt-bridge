@@ -7,12 +7,7 @@ import signal
 import threading
 import paho.mqtt.client as mqtt
 from smartcard.Exceptions import CardConnectionException, NoCardException
-from smartcard.scard import (
-    SCardEstablishContext,
-    SCARD_SCOPE_USER,
-    SCardGetStatusChange,
-    SCARD_STATE_PRESENT,
-)
+from smartcard.scard import SCardEstablishContext, SCARD_SCOPE_USER
 from smartcard.System import readers
 from smartcard.pcsc.PCSCExceptions import EstablishContextException
 
@@ -30,14 +25,14 @@ MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_USERNAME = os.getenv("MQTT_USERNAME")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
-MQTT_TOPIC = os.getenv("MQTT_TOPIC", "homeassistant/nfc/tag")
 DEVICE_ID = os.getenv("DEVICE_ID", "nfc_reader")
 DEVICE_NAME = os.getenv("DEVICE_NAME", f"NFC Reader {DEVICE_ID}")
 
-# Home Assistant discovery topics
-DISCOVERY_TOPIC = f"homeassistant/sensor/{DEVICE_ID}/uid/config"
+# Home Assistant topics
 STATE_TOPIC = f"homeassistant/sensor/{DEVICE_ID}/uid/state"
 AVAILABILITY_TOPIC = f"homeassistant/sensor/{DEVICE_ID}/availability"
+DISCOVERY_TOPIC = f"homeassistant/sensor/{DEVICE_ID}/uid/config"
+TAG_EVENT_TOPIC = f"homeassistant/event/{DEVICE_ID}/tag_scanned"
 
 # -----------------------
 # MQTT Setup
@@ -66,7 +61,7 @@ def publish_discovery(client):
             "name": DEVICE_NAME,
             "manufacturer": "DIY",
             "model": "Raspberry Pi NFC",
-        }
+        },
     }
     client.publish(DISCOVERY_TOPIC, json.dumps(payload), retain=True)
     client.publish(AVAILABILITY_TOPIC, "online", retain=True)
@@ -86,34 +81,36 @@ def monitor_reader(client):
         return
 
     last_uid = None
-    reader_state = {}
     while True:
         try:
-            # Wait indefinitely for a card present event
             readers_list = readers()
             if not readers_list:
                 time.sleep(2)
                 continue
 
             for reader in readers_list:
-                hreader = reader.createConnection()
-                # Poll the reader status
-                reader_state[reader] = reader_state.get(reader, 0)
+                connection = reader.createConnection()
                 try:
-                    hreader.connect()
+                    connection.connect()
                     card_present = True
                 except NoCardException:
                     card_present = False
 
                 if card_present:
-                    uid = hreader.getATR()
+                    uid = connection.getATR()
                     uid_str = "".join(f"{x:02X}" for x in uid)
                     if uid_str != last_uid:
                         log.info(f"Tag detected: {uid_str}")
+                        # Update HA sensor
                         client.publish(STATE_TOPIC, uid_str, qos=1, retain=False)
+                        # Fire tag_scanned event
+                        client.publish(TAG_EVENT_TOPIC, json.dumps({"tag_uid": uid_str}), qos=1, retain=False)
                         last_uid = uid_str
                 else:
-                    last_uid = None
+                    if last_uid is not None:
+                        log.info("Tag removed")
+                        client.publish(STATE_TOPIC, "", qos=1, retain=False)
+                        last_uid = None
 
             time.sleep(0.5)
         except CardConnectionException as e:
