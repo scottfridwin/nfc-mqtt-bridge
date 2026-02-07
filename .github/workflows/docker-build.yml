@@ -63,6 +63,7 @@ jobs:
           tags: |
             ghcr.io/${{ github.repository }}:latest
             ghcr.io/${{ github.repository }}:${{ github.ref_name }}
-            ghcr.io/${{ github.repository }}:${{ env.SHORT_SHA }}
+            ghcr.io/${{ github.repository }}:${{ env.SHORT_TAG }}
+            ghcr.io/${{ github.repository }}:${{ env.TAG }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
