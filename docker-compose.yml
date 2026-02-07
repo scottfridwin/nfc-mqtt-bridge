@@ -1,11 +1,9 @@
-version: "3.9"
-
 services:
   nfc-mqtt:
     build: .
     container_name: nfc-mqtt
     volumes:
-      - "/dev/bus/usb:/dev/bus/usb"  # Give container access to NFC reader
+      - /run/pcscd:/run/pcscd:ro   # Mount host pcscd socket (read-only)
     environment:
       MQTT_HOST: 192.168.0.123
       MQTT_PORT: 1883
