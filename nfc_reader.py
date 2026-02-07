@@ -173,29 +173,30 @@ class NFCObserver(CardObserver):
         except Exception as e:
             log.error(f"Card error: {e}")
 
-
+    
     def publish(self, uid):
-
-        # Sensor update
+    
+        # Update sensor state
         self.client.publish(
             STATE_TOPIC,
             uid,
             qos=1,
             retain=False
         )
-
-        # HA Tag support
-        tag_topic = f"homeassistant/tag/{uid}/scan"
-
+    
+        # Home Assistant Tag scan (OFFICIAL API)
+        tag_payload = {
+            "tag_id": uid.replace(" ", "")
+        }
+    
         self.client.publish(
-            tag_topic,
-            "",
+            "homeassistant/tag/scanned",
+            json.dumps(tag_payload),
             qos=1,
             retain=False
         )
-
-        log.info("Published tag to HA and MQTT")
-
+    
+        log.info("Published tag scan to Home Assistant")
 
 # ==================================================
 # Reader Wait
