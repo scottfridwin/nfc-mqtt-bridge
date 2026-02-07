@@ -62,6 +62,9 @@ def publish_discovery(client):
             "manufacturer": "DIY",
             "model": "Raspberry Pi NFC",
         },
+        # Add this to enable device triggers in HA
+        "device_class": "sensor",
+        "value_template": "{{ value }}",
     }
     client.publish(DISCOVERY_TOPIC, json.dumps(payload), retain=True)
     client.publish(AVAILABILITY_TOPIC, "online", retain=True)
