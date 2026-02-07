@@ -1,253 +1,151 @@
 #!/usr/bin/env python3
-
 import os
 import time
 import json
-import socket
 import logging
+import signal
 import threading
-
 import paho.mqtt.client as mqtt
+from smartcard.Exceptions import CardConnectionException, NoCardException
+from smartcard.scard import (
+    SCardEstablishContext,
+    SCARD_SCOPE_USER,
+    SCardGetStatusChange,
+    SCARD_STATE_PRESENT,
+)
+from smartcard.pcsc.PCSCExceptions import EstablishContextException
 
-from smartcard.System import readers
-from smartcard.util import toHexString
-from smartcard.CardMonitoring import CardMonitor, CardObserver
-from smartcard.Exceptions import NoCardException
-
-
-# ==================================================
-# Configuration
-# ==================================================
-
+# -----------------------
+# Logging
+# -----------------------
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+log = logging.getLogger("nfc")
 
-MQTT_HOST = os.getenv("MQTT_HOST")
+# -----------------------
+# Environment Variables
+# -----------------------
+MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_USERNAME = os.getenv("MQTT_USERNAME")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 MQTT_TOPIC = os.getenv("MQTT_TOPIC", "homeassistant/nfc/tag")
+DEVICE_ID = os.getenv("DEVICE_ID", "nfc_reader")
 
-DEVICE_ID = socket.gethostname()
-DEVICE_NAME = os.getenv("DEVICE_NAME", "NFC Kiosk Reader")
+# Home Assistant discovery topics
+DISCOVERY_TOPIC = f"homeassistant/sensor/{DEVICE_ID}/uid/config"
+STATE_TOPIC = f"homeassistant/sensor/{DEVICE_ID}/uid/state"
+AVAILABILITY_TOPIC = f"homeassistant/sensor/{DEVICE_ID}/availability"
 
-DISCOVERY_TOPIC = f"homeassistant/sensor/{DEVICE_ID}/config"
-STATE_TOPIC = MQTT_TOPIC
-
-
-# ==================================================
-# Logging
-# ==================================================
-
-logging.basicConfig(
-    level=LOG_LEVEL,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-
-log = logging.getLogger("nfc")
-
-
-# ==================================================
-# MQTT
-# ==================================================
-
-mqtt_client = None
-
-
+# -----------------------
+# MQTT Setup
+# -----------------------
 def setup_mqtt():
-    global mqtt_client
-
-    client = mqtt.Client(
-        client_id=f"nfc-{DEVICE_ID}",
-        protocol=mqtt.MQTTv311,
-        callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-        clean_session=True,
-    )
-
+    client = mqtt.Client()
     if MQTT_USERNAME:
         client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
-
-    client.enable_logger()
-
-    client.on_connect = on_mqtt_connect
-    client.on_disconnect = on_mqtt_disconnect
-
     client.connect(MQTT_HOST, MQTT_PORT, 60)
     client.loop_start()
-
-    mqtt_client = client
-
+    log.info(f"Connected to MQTT broker at {MQTT_HOST}:{MQTT_PORT}")
     return client
 
-
-def on_mqtt_connect(client, userdata, flags, reason_code, properties):
-    if reason_code == 0:
-        log.info("Connected to MQTT broker")
-
-        publish_discovery(client)
-
-    else:
-        log.error(f"MQTT connect failed: {reason_code}")
-
-
-def on_mqtt_disconnect(client, userdata, flags, reason_code, properties):
-    log.warning(f"MQTT disconnected: {reason_code}")
-
-
-# ==================================================
+# -----------------------
 # Home Assistant Discovery
-# ==================================================
-
+# -----------------------
 def publish_discovery(client):
-
     payload = {
-        "name": DEVICE_NAME,
+        "name": f"NFC Reader {DEVICE_ID}",
+        "unique_id": f"{DEVICE_ID}_uid",
         "state_topic": STATE_TOPIC,
-        "unique_id": DEVICE_ID,
+        "availability_topic": AVAILABILITY_TOPIC,
         "icon": "mdi:nfc",
-
         "device": {
             "identifiers": [DEVICE_ID],
-            "name": DEVICE_NAME,
-            "model": "USB NFC Reader",
+            "name": f"NFC Reader {DEVICE_ID}",
             "manufacturer": "DIY",
-        },
-    }
-
-    client.publish(
-        DISCOVERY_TOPIC,
-        json.dumps(payload),
-        retain=True
-    )
-
-    log.info("Published Home Assistant discovery config")
-
-
-# ==================================================
-# NFC Handling
-# ==================================================
-
-class NFCObserver(CardObserver):
-
-    def __init__(self, mqtt_client):
-        self.client = mqtt_client
-        self.last_uid = None
-
-    def update(self, observable, actions):
-
-        (added_cards, removed_cards) = actions
-
-        for card in added_cards:
-            self.handle_card(card)
-
-        for card in removed_cards:
-            self.last_uid = None
-
-
-    def handle_card(self, card):
-
-        try:
-            connection = card.createConnection()
-            connection.connect()
-
-            # Get UID
-            apdu = [0xFF, 0xCA, 0x00, 0x00, 0x00]
-            data, sw1, sw2 = connection.transmit(apdu)
-
-            if sw1 != 0x90:
-                return
-
-            uid = toHexString(data)
-
-            if uid == self.last_uid:
-                return
-
-            self.last_uid = uid
-
-            log.info(f"Tag detected: {uid}")
-
-            self.publish(uid)
-
-        except NoCardException:
-            pass
-
-        except Exception as e:
-            log.error(f"Card error: {e}")
-
-    
-    def publish(self, uid):
-    
-        # Update sensor state
-        self.client.publish(
-            STATE_TOPIC,
-            uid,
-            qos=1,
-            retain=False
-        )
-    
-        # Home Assistant Tag scan (OFFICIAL API)
-        tag_payload = {
-            "tag_id": uid.replace(" ", "")
+            "model": "Raspberry Pi NFC",
         }
-    
-        self.client.publish(
-            "homeassistant/tag/scanned",
-            json.dumps(tag_payload),
-            qos=1,
-            retain=False
-        )
-    
-        log.info("Published tag scan to Home Assistant")
+    }
+    client.publish(DISCOVERY_TOPIC, json.dumps(payload), retain=True)
+    client.publish(AVAILABILITY_TOPIC, "online", retain=True)
+    log.info("Home Assistant MQTT discovery published")
 
-# ==================================================
-# Reader Wait
-# ==================================================
+def set_offline(client):
+    client.publish(AVAILABILITY_TOPIC, "offline", retain=True)
 
-def wait_for_reader():
-
-    log.info("Waiting for NFC reader...")
-
-    while True:
-
-        r = readers()
-
-        if r:
-            log.info(f"Using reader: {r[0]}")
-            return
-
-        time.sleep(2)
-
-
-# ==================================================
-# Main
-# ==================================================
-
-def main():
-
-    log.info("Starting NFC MQTT Bridge (event-based)")
-
-    if not MQTT_HOST:
-        log.error("MQTT_HOST not set")
-        exit(1)
-
-    setup_mqtt()
-
-    wait_for_reader()
-
-    monitor = CardMonitor()
-    observer = NFCObserver(mqtt_client)
-
-    monitor.addObserver(observer)
-
-    log.info("NFC reader monitoring started")
-
-    # Keep main thread alive
+# -----------------------
+# NFC Reader Event Loop
+# -----------------------
+def monitor_reader(client):
     try:
-        while True:
-            time.sleep(60)
+        context = SCardEstablishContext(SCARD_SCOPE_USER)
+    except EstablishContextException as e:
+        log.error(f"Cannot establish PC/SC context: {e}")
+        return
 
-    except KeyboardInterrupt:
-        log.info("Shutting down")
+    last_uid = None
+    reader_state = {}
+    while True:
+        try:
+            # Wait indefinitely for a card present event
+            readers_list = pcsc_readers(context)
+            if not readers_list:
+                time.sleep(2)
+                continue
 
+            for reader in readers_list:
+                hreader = reader.createConnection()
+                # Poll the reader status
+                reader_state[reader] = reader_state.get(reader, 0)
+                try:
+                    hreader.connect()
+                    card_present = True
+                except NoCardException:
+                    card_present = False
 
+                if card_present:
+                    uid = hreader.getATR()
+                    uid_str = "".join(f"{x:02X}" for x in uid)
+                    if uid_str != last_uid:
+                        log.info(f"Tag detected: {uid_str}")
+                        client.publish(STATE_TOPIC, uid_str, qos=1, retain=False)
+                        last_uid = uid_str
+                else:
+                    last_uid = None
+
+            time.sleep(0.5)
+        except CardConnectionException as e:
+            log.warning(f"Reader connection error: {e}")
+            last_uid = None
+            time.sleep(1)
+        except Exception as e:
+            log.error(f"Unexpected error in monitor loop: {e}")
+            time.sleep(2)
+
+# -----------------------
+# Signal Handling
+# -----------------------
+def handle_shutdown(signum, frame):
+    log.info("Shutting down NFC reader...")
+    set_offline(mqtt_client)
+    mqtt_client.loop_stop()
+    mqtt_client.disconnect()
+    exit(0)
+
+signal.signal(signal.SIGINT, handle_shutdown)
+signal.signal(signal.SIGTERM, handle_shutdown)
+
+# -----------------------
+# Main
+# -----------------------
 if __name__ == "__main__":
-    main()
+    log.info("Starting NFC MQTT Bridge (event-based)")
+    mqtt_client = setup_mqtt()
+    publish_discovery(mqtt_client)
+
+    # Start NFC monitoring thread
+    threading.Thread(target=monitor_reader, args=(mqtt_client,), daemon=True).start()
+
+    # Keep the main thread alive
+    while True:
+        time.sleep(1)
