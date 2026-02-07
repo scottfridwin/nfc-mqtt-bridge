@@ -1,45 +1,57 @@
+# syntax=docker/dockerfile:1.7
+
+############################
+# Base image
+############################
 FROM python:3.11-slim
 
-ENV DEBIAN_FRONTEND=noninteractive
+ENV \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_PREFER_BINARY=1
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+WORKDIR /app
+
+############################
+# System dependencies
+############################
+RUN apt-get update && apt-get install -y --no-install-recommends \
     pcscd \
     libpcsclite1 \
     libpcsclite-dev \
     pcsc-tools \
     libusb-1.0-0 \
-    libusb-1.0-0-dev \
-    build-essential \
-    pkg-config \
-    libssl-dev \
-    libffi-dev \
-    rustc \
-    cargo \
-    curl \
     ca-certificates \
+    curl \
+    gcc \
+    pkg-config \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# Set workdir
-WORKDIR /app
-
-# Copy requirements first (for caching)
+############################
+# Python dependencies (cached)
+############################
 COPY requirements.txt .
 
-# Upgrade pip tools
-RUN pip install --upgrade pip setuptools wheel
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip setuptools wheel && \
+    pip install --prefer-binary -r requirements.txt
 
-# Install Python deps (builds pyscard correctly on ARM)
-RUN pip install --no-cache-dir -r requirements.txt
+############################
+# Application code
+############################
+COPY app.py .
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh
 
-# Copy app
-COPY nfc_reader.py .
-COPY start.sh .
-
-RUN chmod +x start.sh
-
-# Non-root user
+############################
+# Non-root user (security)
+############################
 RUN useradd -m appuser
 USER appuser
 
-CMD ["./start.sh"]
+############################
+# Startup
+############################
+ENTRYPOINT ["./entrypoint.sh"]
