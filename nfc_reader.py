@@ -1,31 +1,34 @@
+#!/usr/bin/env python3
+
 import os
 import time
 import logging
+import threading
 
 import paho.mqtt.client as mqtt
 
-from smartcard.System import readers
+from smartcard.CardMonitoring import CardMonitor, CardObserver
 from smartcard.util import toHexString
-from smartcard.Exceptions import NoReadersException, CardConnectionException
+from smartcard.Exceptions import CardConnectionException
 
 
-# --------------------------------------------------
+# -----------------------------------------------------------------------------
 # Logging
-# --------------------------------------------------
+# -----------------------------------------------------------------------------
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 logging.basicConfig(
     level=LOG_LEVEL,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 
 log = logging.getLogger("nfc")
 
 
-# --------------------------------------------------
+# -----------------------------------------------------------------------------
 # MQTT Config
-# --------------------------------------------------
+# -----------------------------------------------------------------------------
 
 MQTT_HOST = os.getenv("MQTT_HOST")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
@@ -34,9 +37,9 @@ MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
 MQTT_TOPIC = os.getenv("MQTT_TOPIC", "homeassistant/nfc/tag")
 
 
-# --------------------------------------------------
+# -----------------------------------------------------------------------------
 # MQTT Setup
-# --------------------------------------------------
+# -----------------------------------------------------------------------------
 
 def setup_mqtt():
     client = mqtt.Client()
@@ -45,120 +48,164 @@ def setup_mqtt():
         client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
 
     client.connect(MQTT_HOST, MQTT_PORT, 60)
+
     client.loop_start()
 
-    log.info("Connected to MQTT broker")
+    log.info("Connected to MQTT broker at %s:%s", MQTT_HOST, MQTT_PORT)
 
     return client
 
 
-# --------------------------------------------------
-# NFC Reader Detection
-# --------------------------------------------------
+# -----------------------------------------------------------------------------
+# NFC Observer
+# -----------------------------------------------------------------------------
 
-def wait_for_reader():
-    """Wait until at least one PC/SC reader is available"""
+class NFCObserver(CardObserver):
+    """
+    Receives card insert/remove events from PC/SC
+    """
 
-    while True:
-        try:
-            r = readers()
+    def __init__(self, mqtt_client):
+        super().__init__()
 
-            if r:
-                log.info("Found reader: %s", r[0])
-                return r[0]
-
-            raise NoReadersException()
-
-        except NoReadersException:
-            log.warning("No NFC readers found")
-
-        except Exception as e:
-            log.warning("Reader detection error: %s", e)
-
-        log.info("Waiting for NFC reader...")
-        time.sleep(2)
+        self.mqtt = mqtt_client
+        self.last_uid = None
+        self.lock = threading.Lock()
 
 
-# --------------------------------------------------
-# Card Reading
-# --------------------------------------------------
+    def update(self, observable, actions):
+        """
+        Called automatically on card insert/remove
+        """
 
-def read_uid(connection):
-    """Read UID from NFC tag"""
-
-    # GET DATA (UID)
-    apdu = [0xFF, 0xCA, 0x00, 0x00, 0x00]
-
-    data, sw1, sw2 = connection.transmit(apdu)
-
-    if sw1 == 0x90 and sw2 == 0x00:
-        return toHexString(data)
-
-    return None
+        (added_cards, removed_cards) = actions
 
 
-# --------------------------------------------------
-# Main Loop
-# --------------------------------------------------
-
-def main():
-    log.info("Starting NFC MQTT Bridge")
-
-    mqtt_client = setup_mqtt()
-
-    reader = wait_for_reader()
-
-    last_uid = None
-    connection = None
+        # Card inserted
+        for card in added_cards:
+            self.handle_card_insert(card)
 
 
-    while True:
-        try:
-            # (Re)connect if needed
-            if connection is None:
-                connection = reader.createConnection()
+        # Card removed
+        for card in removed_cards:
+            self.handle_card_remove(card)
+
+
+    # -------------------------------------------------------------------------
+
+    def handle_card_insert(self, card):
+
+        with self.lock:
+
+            try:
+                connection = card.createConnection()
                 connection.connect()
 
-                log.info("Connected to NFC reader")
+                # Get UID APDU
+                apdu = [0xFF, 0xCA, 0x00, 0x00, 0x00]
+
+                data, sw1, sw2 = connection.transmit(apdu)
 
 
-            uid = read_uid(connection)
+                if sw1 != 0x90:
+                    log.warning(
+                        "Failed to read UID (SW=%02X%02X)",
+                        sw1,
+                        sw2,
+                    )
+                    return
 
-            if uid and uid != last_uid:
+
+                uid = toHexString(data)
+
+
+                # Deduplicate
+                if uid == self.last_uid:
+                    return
+
+
+                self.last_uid = uid
+
+
                 log.info("Tag detected: %s", uid)
 
-                mqtt_client.publish(
+
+                self.mqtt.publish(
                     MQTT_TOPIC,
                     uid,
                     qos=1,
-                    retain=False
+                    retain=False,
                 )
 
-                last_uid = uid
+
+            except CardConnectionException as e:
+                log.warning("Card connection failed: %s", e)
 
 
-            time.sleep(1)
+            except Exception as e:
+                log.error(
+                    "Unexpected NFC error: %s",
+                    e,
+                    exc_info=True,
+                )
 
 
-        except CardConnectionException:
-            log.warning("Card connection lost")
-            connection = None
-            last_uid = None
-            time.sleep(2)
+    # -------------------------------------------------------------------------
+
+    def handle_card_remove(self, card):
+
+        with self.lock:
+
+            log.info("Tag removed")
+
+            self.last_uid = None
 
 
-        except Exception as e:
-            log.error("Reader error: %s", e, exc_info=True)
+# -----------------------------------------------------------------------------
+# Main
+# -----------------------------------------------------------------------------
 
-            connection = None
-            last_uid = None
+def main():
 
-            time.sleep(2)
+    log.info("Starting NFC MQTT Bridge (event-based)")
 
 
-# --------------------------------------------------
-# Entry Point
-# --------------------------------------------------
+    # Sanity check
+    if not MQTT_HOST:
+        log.error("MQTT_HOST is not set")
+        return
+
+
+    # MQTT
+    mqtt_client = setup_mqtt()
+
+
+    # PC/SC Monitor
+    card_monitor = CardMonitor()
+
+    observer = NFCObserver(mqtt_client)
+
+    card_monitor.addObserver(observer)
+
+
+    log.info("NFC reader monitoring started")
+
+
+    # Keep main thread alive forever
+    try:
+        while True:
+            time.sleep(60)
+
+    except KeyboardInterrupt:
+        log.info("Shutting down")
+
+    finally:
+        card_monitor.deleteObserver(observer)
+        mqtt_client.loop_stop()
+        mqtt_client.disconnect()
+
+
+# -----------------------------------------------------------------------------
 
 if __name__ == "__main__":
     main()
