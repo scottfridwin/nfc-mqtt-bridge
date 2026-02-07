@@ -1,15 +1,11 @@
 #!/bin/bash
-# Start script for NFC MQTT Bridge inside container
 
-# Start pcscd in the foreground
-echo "[INFO] Starting pcscd daemon..."
-pcscd -f &
-
-# Wait for pcscd socket
-while [ ! -S /var/run/pcscd/pcscd.comm ]; do
+# Wait for host pcscd socket
+SOCKET="/run/pcscd/pcscd.comm"
+while [ ! -S "$SOCKET" ]; do
     echo "[INFO] Waiting for pcscd socket..."
-    sleep 1
+    sleep 2
 done
 
-echo "[INFO] pcscd socket found"
-exec python nfc_reader.py
+echo "[INFO] pcscd socket found. Starting NFC Reader..."
+exec python /app/nfc_reader.py
