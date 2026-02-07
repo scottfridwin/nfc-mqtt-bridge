@@ -54,14 +54,14 @@ def setup_mqtt():
 # -----------------------
 def publish_discovery(client):
     payload = {
-        "name": f"NFC Reader {DEVICE_ID}",
+        "name": DEVICE_NAME,
         "unique_id": f"{DEVICE_ID}_uid",
         "state_topic": STATE_TOPIC,
         "availability_topic": AVAILABILITY_TOPIC,
         "icon": "mdi:nfc",
         "device": {
             "identifiers": [DEVICE_ID],
-            "name": f"NFC Reader {DEVICE_ID}",
+            "name": DEVICE_NAME",
             "manufacturer": "DIY",
             "model": "Raspberry Pi NFC",
         }
