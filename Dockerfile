@@ -41,9 +41,9 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 ############################
 # Application code
 ############################
-COPY app.py .
-COPY entrypoint.sh .
-RUN chmod +x entrypoint.sh
+COPY nfc_reader.py .
+COPY start.sh .
+RUN chmod +x start.sh
 
 ############################
 # Non-root user (security)
@@ -54,4 +54,4 @@ USER appuser
 ############################
 # Startup
 ############################
-ENTRYPOINT ["./entrypoint.sh"]
+ENTRYPOINT ["./start.sh"]
