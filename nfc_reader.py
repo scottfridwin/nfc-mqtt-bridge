@@ -42,7 +42,9 @@ MQTT_TOPIC = os.getenv("MQTT_TOPIC", "homeassistant/nfc/tag")
 # -----------------------------------------------------------------------------
 
 def setup_mqtt():
-    client = mqtt.Client()
+    client = mqtt.Client(
+        callback_api_version=mqtt.CallbackAPIVersion.VERSION2
+    )
 
     if MQTT_USERNAME:
         client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
@@ -54,7 +56,6 @@ def setup_mqtt():
     log.info("Connected to MQTT broker at %s:%s", MQTT_HOST, MQTT_PORT)
 
     return client
-
 
 # -----------------------------------------------------------------------------
 # NFC Observer
