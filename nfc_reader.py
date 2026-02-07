@@ -2,7 +2,6 @@ import os
 import time
 import logging
 import paho.mqtt.client as mqtt
-
 from smartcard.System import readers
 from smartcard.util import toHexString
 
@@ -12,7 +11,7 @@ logging.basicConfig(level=LOG_LEVEL)
 log = logging.getLogger("nfc")
 
 # MQTT Config
-MQTT_HOST = os.getenv("MQTT_HOST")
+MQTT_HOST = os.getenv("MQTT_HOST", "192.168.0.17")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_USERNAME = os.getenv("MQTT_USERNAME")
 MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
@@ -48,6 +47,7 @@ def main():
     while True:
         try:
             connection.connect()
+            # APDU command to get UID
             apdu = [0xFF, 0xCA, 0x00, 0x00, 0x00]
             data, sw1, sw2 = connection.transmit(apdu)
 
