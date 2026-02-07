@@ -2,8 +2,10 @@ import os
 import time
 import logging
 import paho.mqtt.client as mqtt
-
-from smartcard.pcsc.PCSCReader import establishContext, SCARD_SCOPE_USER
+from smartcard.scard import (
+    SCardEstablishContext,
+    SCARD_SCOPE_USER
+)
 from smartcard.pcsc.PCSCExceptions import EstablishContextException
 from smartcard.util import toHexString
 from smartcard.pcsc.PCSCReader import readers as pcsc_readers
@@ -36,7 +38,7 @@ def wait_for_reader():
     while True:
         try:
             # Force v4 context
-            context = establishContext(SCARD_SCOPE_USER)
+            context = SCardEstablishContext(SCARD_SCOPE_USER)
             r = pcsc_readers(context)
             if r:
                 log.info(f"Found reader: {r[0]}")
