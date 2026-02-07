@@ -1,9 +1,8 @@
-# Use slim Python image for small size
+# Use a small Python image
 FROM python:3.11-slim
 
-# Install dependencies for PCSC and building pyscard
+# Install dependencies for PCSC client
 RUN apt-get update && apt-get install -y \
-    pcscd \
     libpcsclite1 \
     libpcsclite-dev \
     pcsc-tools \
@@ -11,25 +10,21 @@ RUN apt-get update && apt-get install -y \
     libusb-1.0-0-dev \
     build-essential \
     pkg-config \
-    python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
-WORKDIR /app
-
-# Copy application files
-COPY nfc_reader.py start.sh requirements.txt ./
-
 # Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
-    && pip install --no-cache-dir -r requirements.txt
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Make startup script executable
+# Copy application code
+COPY nfc_reader.py .
+COPY start.sh .
 RUN chmod +x start.sh
 
-# Use non-root user for safety
-RUN useradd -m -u 1000 nfcuser && chown -R nfcuser:nfcuser /app
+# Use non-root user for running app
+RUN useradd -m -u 1000 nfcuser
 USER nfcuser
 
-# Entrypoint
 CMD ["./start.sh"]
