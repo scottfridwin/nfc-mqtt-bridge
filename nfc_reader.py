@@ -60,4 +60,19 @@ def main():
 
             if sw1 == 0x90 and sw2 == 0x00:
                 uid = toHexString(data)
-                i
+                if uid != last_uid:
+                    log.info(f"Tag detected: {uid}")
+                    mqtt_client.publish(MQTT_TOPIC, uid, qos=1, retain=False)
+                    last_uid = uid
+
+            time.sleep(SCAN_INTERVAL)
+
+        except Exception as e:
+            log.error(f"Reader error: {e}, reconnecting...")
+            last_uid = None
+            time.sleep(2)
+            reader = wait_for_reader()
+            connection = reader.createConnection()
+
+if __name__ == "__main__":
+    main()
