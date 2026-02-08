@@ -62,7 +62,7 @@ def publish_discovery(client):
             "manufacturer": "DIY",
             "model": "Raspberry Pi NFC",
         },
-        # Add this to enable device triggers in HA
+        # Enables device triggers
         "device_class": "sensor",
         "value_template": "{{ value }}",
     }
@@ -78,7 +78,7 @@ def set_offline(client):
 # -----------------------
 def monitor_reader(client):
     try:
-        context = SCardEstablishContext(SCARD_SCOPE_USER)
+        SCardEstablishContext(SCARD_SCOPE_USER)
     except EstablishContextException as e:
         log.error(f"Cannot establish PC/SC context: {e}")
         return
@@ -100,15 +100,22 @@ def monitor_reader(client):
                     card_present = False
 
                 if card_present:
-                    uid = connection.getATR()
-                    uid_str = "".join(f"{x:02X}" for x in uid)
-                    if uid_str != last_uid:
-                        log.info(f"Tag detected: {uid_str}")
-                        # Update HA sensor
-                        client.publish(STATE_TOPIC, uid_str, qos=1, retain=False)
-                        # Fire tag_scanned event
-                        client.publish(TAG_EVENT_TOPIC, json.dumps({"tag_uid": uid_str}), qos=1, retain=False)
-                        last_uid = uid_str
+                    # Send APDU to get UID (works on most NFC tags)
+                    get_uid_apdu = [0xFF, 0xCA, 0x00, 0x00, 0x00]
+                    data, sw1, sw2 = connection.transmit(get_uid_apdu)
+
+                    if sw1 == 0x90:  # Success
+                        uid_str = "".join(f"{x:02X}" for x in data)
+                        if uid_str != last_uid:
+                            log.info(f"Tag detected: {uid_str}")
+                            # Update HA sensor
+                            client.publish(STATE_TOPIC, uid_str, qos=1, retain=False)
+                            # Fire tag_scanned event
+                            client.publish(TAG_EVENT_TOPIC, json.dumps({"tag_uid": uid_str}), qos=1, retain=False)
+                            last_uid = uid_str
+                    else:
+                        log.warning(f"Failed to read UID from tag: SW1={sw1:02X}, SW2={sw2:02X}")
+
                 else:
                     if last_uid is not None:
                         log.info("Tag removed")
@@ -116,6 +123,7 @@ def monitor_reader(client):
                         last_uid = None
 
             time.sleep(0.5)
+
         except CardConnectionException as e:
             log.warning(f"Reader connection error: {e}")
             last_uid = None
