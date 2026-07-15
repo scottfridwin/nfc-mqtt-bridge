@@ -4,11 +4,17 @@ services:
     container_name: nfc-mqtt
     volumes:
       - /run/pcscd:/run/pcscd:ro   # Mount host pcscd socket (read-only)
+    secrets:
+      - mqtt_password
     environment:
       MQTT_HOST: 192.168.0.123
       MQTT_PORT: 1883
       MQTT_USERNAME: tagreader
-      MQTT_PASSWORD: changeme
+      MQTT_PASSWORD_FILE: /run/secrets/mqtt_password
       MQTT_TOPIC: homeassistant/nfc/tag
       LOG_LEVEL: INFO
     restart: unless-stopped
+
+secrets:
+  mqtt_password:
+    file: ./.secrets/mqtt_password.txt

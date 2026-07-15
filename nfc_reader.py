@@ -15,8 +15,31 @@ from smartcard.pcsc.PCSCExceptions import EstablishContextException
 # Logging
 # -----------------------
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-logging.basicConfig(level=LOG_LEVEL, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+logging.basicConfig(
+    level=LOG_LEVEL, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 log = logging.getLogger("nfc")
+
+
+def get_env_or_file(name):
+    value = os.getenv(name)
+    file_path = os.getenv(f"{name}_FILE")
+
+    if value and file_path:
+        log.warning("Both %s and %s_FILE are set; using %s", name, name, name)
+        return value
+
+    if value:
+        return value
+
+    if file_path:
+        try:
+            with open(file_path, "r", encoding="utf-8") as secret_file:
+                return secret_file.read().strip()
+        except OSError as exc:
+            log.error("Unable to read %s_FILE '%s': %s", name, file_path, exc)
+
+    return None
+
 
 # -----------------------
 # Environment Variables
@@ -24,7 +47,7 @@ log = logging.getLogger("nfc")
 MQTT_HOST = os.getenv("MQTT_HOST", "localhost")
 MQTT_PORT = int(os.getenv("MQTT_PORT", "1883"))
 MQTT_USERNAME = os.getenv("MQTT_USERNAME")
-MQTT_PASSWORD = os.getenv("MQTT_PASSWORD")
+MQTT_PASSWORD = get_env_or_file("MQTT_PASSWORD")
 DEVICE_ID = os.getenv("DEVICE_ID", "nfc_reader")
 DEVICE_NAME = os.getenv("DEVICE_NAME", f"NFC Reader {DEVICE_ID}")
 
@@ -37,6 +60,8 @@ TAG_EVENT_TOPIC = f"homeassistant/event/{DEVICE_ID}/tag_scanned"
 # -----------------------
 # MQTT Setup
 # -----------------------
+
+
 def setup_mqtt():
     client = mqtt.Client()
     if MQTT_USERNAME:
@@ -49,6 +74,8 @@ def setup_mqtt():
 # -----------------------
 # Home Assistant Discovery
 # -----------------------
+
+
 def publish_discovery(client):
     payload = {
         "name": DEVICE_NAME,
@@ -70,12 +97,15 @@ def publish_discovery(client):
     client.publish(AVAILABILITY_TOPIC, "online", retain=True)
     log.info("Home Assistant MQTT discovery published")
 
+
 def set_offline(client):
     client.publish(AVAILABILITY_TOPIC, "offline", retain=True)
 
 # -----------------------
 # NFC Reader Event Loop
 # -----------------------
+
+
 def monitor_reader(client):
     try:
         SCardEstablishContext(SCARD_SCOPE_USER)
@@ -109,12 +139,15 @@ def monitor_reader(client):
                         if uid_str != last_uid:
                             log.info(f"Tag detected: {uid_str}")
                             # Update HA sensor
-                            client.publish(STATE_TOPIC, uid_str, qos=1, retain=False)
+                            client.publish(STATE_TOPIC, uid_str,
+                                           qos=1, retain=False)
                             # Fire tag_scanned event
-                            client.publish(TAG_EVENT_TOPIC, json.dumps({"tag_uid": uid_str}), qos=1, retain=False)
+                            client.publish(TAG_EVENT_TOPIC, json.dumps(
+                                {"tag_uid": uid_str}), qos=1, retain=False)
                             last_uid = uid_str
                     else:
-                        log.warning(f"Failed to read UID from tag: SW1={sw1:02X}, SW2={sw2:02X}")
+                        log.warning(
+                            f"Failed to read UID from tag: SW1={sw1:02X}, SW2={sw2:02X}")
 
                 else:
                     if last_uid is not None:
@@ -135,12 +168,15 @@ def monitor_reader(client):
 # -----------------------
 # Signal Handling
 # -----------------------
+
+
 def handle_shutdown(signum, frame):
     log.info("Shutting down NFC reader...")
     set_offline(mqtt_client)
     mqtt_client.loop_stop()
     mqtt_client.disconnect()
     exit(0)
+
 
 signal.signal(signal.SIGINT, handle_shutdown)
 signal.signal(signal.SIGTERM, handle_shutdown)
@@ -154,7 +190,8 @@ if __name__ == "__main__":
     publish_discovery(mqtt_client)
 
     # Start NFC monitoring thread
-    threading.Thread(target=monitor_reader, args=(mqtt_client,), daemon=True).start()
+    threading.Thread(target=monitor_reader, args=(
+        mqtt_client,), daemon=True).start()
 
     # Keep the main thread alive
     while True:
